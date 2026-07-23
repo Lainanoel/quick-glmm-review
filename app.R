@@ -59,11 +59,11 @@ if (file.exists("components.R")) {
   uf_logo_uri <- function() NULL
   uf_title <- function(text, logo = uf_logo_uri())
     tags$span(if (!is.null(logo)) tags$img(src = logo, height = "51px", alt = "UF/IFAS",
-                                            style = "margin-right:12px; vertical-align:middle;"),
+                                           style = "margin-right:12px; vertical-align:middle;"),
               tags$span(text, style = "vertical-align:middle;"))
   info_tip <- function(..., placement = "right")
     bslib::tooltip(tags$span(icon("circle-question"),
-                              style = "color:#aaa;cursor:help;margin-left:5px;font-size:0.82em;"),
+                             style = "color:#aaa;cursor:help;margin-left:5px;font-size:0.82em;"),
                    ..., placement = placement)
   copy_js <- "
 function DEcopy(id, btn){
@@ -144,18 +144,32 @@ FAMILY_CHOICES <- c(
 )
 family_from_key <- function(key) {
   switch(key,
-    "gaussian_identity" = gaussian(link = "identity"),
-    "gaussian_log"       = gaussian(link = "log"),
-    "Gamma_log"          = Gamma(link = "log"),
-    "poisson_log"        = poisson(link = "log"),
-    "nbinom2_log"        = glmmTMB::nbinom2(link = "log"),
-    "nbinom1_log"        = glmmTMB::nbinom1(link = "log"),
-    "tweedie_log"        = glmmTMB::tweedie(link = "log"),
-    "beta_logit"         = glmmTMB::beta_family(link = "logit"),
-    gaussian())
+         "gaussian_identity" = gaussian(link = "identity"),
+         "gaussian_log"       = gaussian(link = "log"),
+         "Gamma_log"          = Gamma(link = "log"),
+         "poisson_log"        = poisson(link = "log"),
+         "nbinom2_log"        = glmmTMB::nbinom2(link = "log"),
+         "nbinom1_log"        = glmmTMB::nbinom1(link = "log"),
+         "tweedie_log"        = glmmTMB::tweedie(link = "log"),
+         "beta_logit"         = glmmTMB::beta_family(link = "logit"),
+         gaussian())
 }
 BINARY_LINK_CHOICES <- c("logit" = "logit", "probit" = "probit",
                          "cloglog" = "cloglog", "cauchit" = "cauchit")
+
+# Plain-language valid-domain note per family, shown live under the family
+# picker so a mismatched response (e.g. negative numbers with Gamma, or
+# proportions with Poisson) is caught before fitting rather than after.
+FAMILY_DOMAIN_NOTE <- c(
+  "gaussian_identity" = "Any real number \u2014 positive, negative, or zero.",
+  "gaussian_log"       = "Response must be strictly greater than 0 (the log link is undefined at or below 0).",
+  "Gamma_log"          = "Response must be strictly greater than 0. Gamma is undefined at exactly 0 \u2014 if your data includes true zeros, this is the wrong family.",
+  "poisson_log"        = "Non-negative integer counts: 0, 1, 2, 3, ... No negative values, no decimals.",
+  "nbinom2_log"        = "Non-negative integer counts (0, 1, 2, ...). Use this over Poisson when counts are overdispersed (variance > mean).",
+  "nbinom1_log"        = "Non-negative integer counts (0, 1, 2, ...). An alternative overdispersion structure to nbinom2 (variance scales linearly with the mean).",
+  "tweedie_log"        = "Non-negative continuous values, and CAN include exact zeros (e.g. rainfall, biomass with true absences).",
+  "beta_logit"         = "Strictly between 0 and 1 \u2014 EXCLUDES exact 0 and exact 1. Rescale data that touches the boundaries, e.g. y' = (y*(n-1)+0.5)/n."
+)
 
 # ---------------------------------------------------------------------------
 #  Built-in example data: counts + a zero-inflated count + a binary outcome
@@ -171,33 +185,33 @@ make_example_data <- function() {
   b <- site_eff[as.character(d$Site)]
   trtC <- c(Control = 0, Fertilized = 0.6, Grazed = -0.4)[d$Treatment]
   seaC <- c(Spring = 0, Fall = -0.3)[d$Season]
-
+  
   # overdispersed counts -> nbinom2 target
   mu_count <- exp(1.2 + trtC + seaC + b)
   d$insect_count <- rnbinom(n, mu = mu_count, size = 2)
-
+  
   # zero-heavy counts -> good candidate for ziformula
   zi_p <- plogis(-1 + 0.8 * (d$Treatment == "Grazed"))
   lam  <- exp(1.0 + trtC + b)
   d$seedling_count <- ifelse(rbinom(n, 1, zi_p) == 1, 0, rpois(n, lam))
-
+  
   # proportion in (0,1) -> beta family
   eta <- 0.5 + trtC * 0.5 + seaC * 0.3 + b
   d$cover_prop <- pmin(pmax(plogis(eta) + rnorm(n, 0, 0.03), 0.001), 0.999)
-
+  
   # binary presence/absence -> binomial (own tab)
   peta <- -0.3 + 0.9 * (d$Treatment == "Fertilized") - 0.6 * (d$Treatment == "Grazed") + b
   d$present <- rbinom(n, 1, plogis(peta))
-
+  
   d
 }
 
 code_panel <- function(out_id, label = "R code") {
   tags$details(class = "uf-codewrap",
-              tags$summary(tags$b(sprintf("\u25b6 %s (copy & run in R)", label))),
-              tags$button("Copy code", class = "btn btn-default uf-copy",
-                          onclick = sprintf("DEcopy('%s', this)", out_id)),
-              verbatimTextOutput(out_id))
+               tags$summary(tags$b(sprintf("\u25b6 %s (copy & run in R)", label))),
+               tags$button("Copy code", class = "btn btn-default uf-copy",
+                           onclick = sprintf("DEcopy('%s', this)", out_id)),
+               verbatimTextOutput(out_id))
 }
 
 css_block <- tags$head(
@@ -223,18 +237,18 @@ css_block <- tags$head(
 setup_controls <- function(prefix) {
   tagList(
     tags$details(open = NA,
-      tags$summary(tags$b("\u25be Variable types \u2014 treat numbers as categories")),
-      helpText("If a treatment level or ID is stored as a number, read it as a ",
-               "factor so its levels are compared as groups, not fit as a slope."),
-      uiOutput(paste0(prefix, "_force_factor_ui"))),
+                 tags$summary(tags$b("\u25be Variable types \u2014 treat numbers as categories")),
+                 helpText("If a treatment level or ID is stored as a number, read it as a ",
+                          "factor so its levels are compared as groups, not fit as a slope."),
+                 uiOutput(paste0(prefix, "_force_factor_ui"))),
     tags$details(open = NA,
-      tags$summary(tags$b("\u25be Create combined variable (interaction)")),
-      helpText("Paste 2+ columns into one new factor \u2014 useful as a ",
-               "dispersion-model predictor (e.g. Treatment.Season)."),
-      uiOutput(paste0(prefix, "_combo_vars_ui")),
-      textInput(paste0(prefix, "_combo_sep"), "Separator", value = "."),
-      actionButton(paste0(prefix, "_combo_add"), "Create variable", class = "btn-primary"),
-      uiOutput(paste0(prefix, "_combo_list_ui")))
+                 tags$summary(tags$b("\u25be Create combined variable (interaction)")),
+                 helpText("Paste 2+ columns into one new factor \u2014 useful as a ",
+                          "dispersion-model predictor (e.g. Treatment.Season)."),
+                 uiOutput(paste0(prefix, "_combo_vars_ui")),
+                 textInput(paste0(prefix, "_combo_sep"), "Separator", value = "."),
+                 actionButton(paste0(prefix, "_combo_add"), "Create variable", class = "btn-primary"),
+                 uiOutput(paste0(prefix, "_combo_list_ui")))
   )
 }
 
@@ -246,171 +260,186 @@ ui <- fluidPage(
   theme = uf_theme(),
   title = "Quick GLMM Review",
   css_block,
-
+  
   div(class = "uf-header",
       div(class = "uf-title", uf_title("Quick GLMM Review")),
       div(class = "uf-sub", "glmmTMB \u00b7 DHARMa \u00b7 emmeans  |  University of Florida")),
-
+  
   radioButtons("data_source", "Data source",
-              choices = c("Example data (counts + proportion + binary)" = "example",
-                          "Upload a CSV file" = "upload"), selected = "example", inline = TRUE),
+               choices = c("Example data (counts + proportion + binary)" = "example",
+                           "Upload a CSV file" = "upload"), selected = "example", inline = TRUE),
   conditionalPanel("input.data_source == 'upload'",
                    fileInput("file", "Choose CSV file", accept = c(".csv", ".txt")),
                    checkboxInput("header", "Header row", TRUE)),
   tags$hr(),
-
+  
   tabsetPanel(
     id = "main_tabs",
-
+    
     # =======================================================================
     # TAB 1 : General GLMM (counts, proportions, continuous, right-skewed...)
     # =======================================================================
     tabPanel("General GLMM",
-      sidebarLayout(
-        sidebarPanel(width = 4,
-          setup_controls("g"),
-          tags$hr(),
-          uiOutput("g_response_ui"),
-          selectInput("g_family", "Family (distribution + link)",
-                      choices = FAMILY_CHOICES, selected = "nbinom2_log"),
-          uiOutput("g_fixed_ui"),
-          checkboxInput("g_interactions", "Include interactions among fixed effects", FALSE),
-          uiOutput("g_random_ui"),
-          tags$details(tags$summary(tags$b("\u25b8 Random slope (optional)")),
-                       uiOutput("g_slope_ui"), uiOutput("g_slope_group_ui")),
-          tags$hr(),
-          tags$details(open = NA, tags$summary(tags$b("\u25be Zero-inflation model (ziformula)")),
-                       helpText("Models the probability of a structural extra zero. ",
-                                "Leave the picker empty for an intercept-only ",
-                                "zero-inflation model (~1)."),
-                       checkboxInput("g_zi_on", "Include a zero-inflation term", FALSE),
-                       uiOutput("g_zi_vars_ui")),
-          tags$details(open = NA, tags$summary(tags$b("\u25be Dispersion model (dispformula)")),
-                       helpText("0, 1, or 2 predictors for how residual dispersion ",
-                                "varies (e.g. by Treatment). Created interaction ",
-                                "variables can be used here too."),
-                       uiOutput("g_disp_vars_ui")),
-          tags$hr(),
-          uiOutput("g_emm_ui"), uiOutput("g_emm_by_ui"),
-          selectInput("g_adjust", "Post-hoc p-value adjustment",
-                      choices = c("Tukey" = "tukey", "Sidak" = "sidak",
-                                  "Bonferroni" = "bonferroni", "Holm" = "holm", "None" = "none"),
-                      selected = "tukey"),
-          sliderInput("g_conf", "Confidence level", min = 0.80, max = 0.99, value = 0.95, step = 0.01),
-          tags$hr(),
-          actionButton("g_run", "Fit model", class = "btn-primary"),
-          actionButton("g_reset", "Reset", class = "btn-default")
-        ),
-        mainPanel(width = 8,
-          uiOutput("g_message_box"),
-          tabsetPanel(id = "g_result_tabs",
-            tabPanel("Data", h4("Preview"), DT::dataTableOutput("g_data_head"),
-                     h4("Structure"), verbatimTextOutput("g_data_str")),
-            tabPanel("Model & code", h4("Formula used"), verbatimTextOutput("g_formula_txt"),
-                     h4("Model summary"), verbatimTextOutput("g_model_summary"),
-                     h4("AIC / BIC / logLik"), DT::dataTableOutput("g_fit_table"),
-                     h4("R code"), verbatimTextOutput("g_code_block"),
-                     tags$button("Copy code", class = "btn btn-default uf-copy",
-                                 onclick = "DEcopy('g_code_block', this)"),
-                     downloadButton("g_dl_code", "Download .R", class = "btn-default uf-dl")),
-            tabPanel("Wald ANOVA", helpText("Type III Wald chi-square tests (car::Anova). ",
-                                            "A likelihood-ratio alternative is noted if car is unavailable."),
-                     verbatimTextOutput("g_anova_table")),
-            tabPanel("DHARMa residuals",
-                     helpText("Simulation-based residuals \u2014 the right tool for glmmTMB ",
-                              "(ordinary Pearson/deviance residuals from a GLMM are not ",
-                              "reliably uniform, so this replaces the lmer residual panel)."),
-                     plotOutput("g_dharma_plot", height = "420px"),
-                     downloadButton("g_dl_dharma", "Download PNG", class = "btn-default uf-dl"),
-                     h4("Overdispersion test"), verbatimTextOutput("g_disp_test"),
-                     h4("Zero-inflation test"), verbatimTextOutput("g_zi_test"),
-                     h4("Outlier test"), verbatimTextOutput("g_outlier_test"),
-                     code_panel("g_code_dharma", "DHARMa code")),
-            tabPanel("EMMeans & post-hoc",
-                     h4("Estimated marginal means (response scale)"), DT::dataTableOutput("g_emm_table"),
-                     downloadButton("g_dl_emm", "Download CSV", class = "btn-default uf-dl"),
-                     h4("Pairwise comparisons"), DT::dataTableOutput("g_pairs_table"),
-                     downloadButton("g_dl_pairs", "Download CSV", class = "btn-default uf-dl"),
-                     h4("Compact letter display"), DT::dataTableOutput("g_cld_table"),
-                     downloadButton("g_dl_cld", "Download CSV", class = "btn-default uf-dl"),
-                     h4("EMMeans plot"), plotOutput("g_emm_plot", height = "460px"),
-                     downloadButton("g_dl_emmplot", "Download PNG", class = "btn-default uf-dl"),
-                     code_panel("g_code_emm", "EMMeans code"))
-          )
-        )
-      )
+             sidebarLayout(
+               sidebarPanel(width = 4,
+                            setup_controls("g"),
+                            tags$hr(),
+                            uiOutput("g_response_ui"),
+                            selectInput("g_family",
+                                        tagList("Family (distribution + link)",
+                                                info_tip("Choose the distribution that matches your response's ",
+                                                         "valid range (e.g. counts, positive continuous, or a ",
+                                                         "proportion). The note below the box updates for whatever ",
+                                                         "family is selected and lists exactly what values are valid.")),
+                                        choices = FAMILY_CHOICES, selected = "nbinom2_log"),
+                            uiOutput("g_family_note"),
+                            uiOutput("g_fixed_ui"),
+                            checkboxInput("g_interactions", "Include interactions among fixed effects", FALSE),
+                            uiOutput("g_random_ui"),
+                            tags$details(tags$summary(tags$b("\u25b8 Random slope (optional)")),
+                                         uiOutput("g_slope_ui"), uiOutput("g_slope_group_ui")),
+                            tags$hr(),
+                            tags$details(open = NA, tags$summary(tags$b("\u25be Zero-inflation model (ziformula)")),
+                                         helpText("Models the probability of a structural extra zero. ",
+                                                  "Leave the picker empty for an intercept-only ",
+                                                  "zero-inflation model (~1)."),
+                                         checkboxInput("g_zi_on", "Include a zero-inflation term", FALSE),
+                                         uiOutput("g_zi_vars_ui")),
+                            tags$details(open = NA, tags$summary(tags$b("\u25be Dispersion model (dispformula)")),
+                                         helpText("0, 1, or 2 predictors for how residual dispersion ",
+                                                  "varies (e.g. by Treatment). Created interaction ",
+                                                  "variables can be used here too."),
+                                         uiOutput("g_disp_vars_ui")),
+                            tags$hr(),
+                            uiOutput("g_emm_ui"), uiOutput("g_emm_by_ui"),
+                            selectInput("g_adjust", "Post-hoc p-value adjustment",
+                                        choices = c("Tukey" = "tukey", "Sidak" = "sidak",
+                                                    "Bonferroni" = "bonferroni", "Holm" = "holm", "None" = "none"),
+                                        selected = "tukey"),
+                            sliderInput("g_conf", "Confidence level", min = 0.80, max = 0.99, value = 0.95, step = 0.01),
+                            tags$hr(),
+                            actionButton("g_run", "Fit model", class = "btn-primary"),
+                            actionButton("g_reset", "Reset", class = "btn-default")
+               ),
+               mainPanel(width = 8,
+                         uiOutput("g_message_box"),
+                         tabsetPanel(id = "g_result_tabs",
+                                     tabPanel("Data", h4("Preview"), DT::dataTableOutput("g_data_head"),
+                                              h4("Structure"), verbatimTextOutput("g_data_str")),
+                                     tabPanel("Model & code", h4("Formula used"), verbatimTextOutput("g_formula_txt"),
+                                              h4("Model summary"), verbatimTextOutput("g_model_summary"),
+                                              h4("AIC / BIC / logLik"), DT::dataTableOutput("g_fit_table"),
+                                              h4("R code"), verbatimTextOutput("g_code_block"),
+                                              tags$button("Copy code", class = "btn btn-default uf-copy",
+                                                          onclick = "DEcopy('g_code_block', this)"),
+                                              downloadButton("g_dl_code", "Download .R", class = "btn-default uf-dl")),
+                                     tabPanel("Wald ANOVA", helpText("Type III Wald chi-square tests (car::Anova). ",
+                                                                     "A likelihood-ratio alternative is noted if car is unavailable."),
+                                              verbatimTextOutput("g_anova_table")),
+                                     tabPanel("DHARMa residuals",
+                                              helpText("Simulation-based residuals \u2014 the right tool for glmmTMB ",
+                                                       "(ordinary Pearson/deviance residuals from a GLMM are not ",
+                                                       "reliably uniform, so this replaces the lmer residual panel)."),
+                                              plotOutput("g_dharma_plot", height = "420px"),
+                                              downloadButton("g_dl_dharma", "Download PNG", class = "btn-default uf-dl"),
+                                              h4("Overdispersion test"), verbatimTextOutput("g_disp_test"),
+                                              h4("Zero-inflation test"), verbatimTextOutput("g_zi_test"),
+                                              h4("Outlier test"), verbatimTextOutput("g_outlier_test"),
+                                              code_panel("g_code_dharma", "DHARMa code")),
+                                     tabPanel("EMMeans & post-hoc",
+                                              h4("Estimated marginal means (response scale)"), DT::dataTableOutput("g_emm_table"),
+                                              downloadButton("g_dl_emm", "Download CSV", class = "btn-default uf-dl"),
+                                              h4("Pairwise comparisons"), DT::dataTableOutput("g_pairs_table"),
+                                              downloadButton("g_dl_pairs", "Download CSV", class = "btn-default uf-dl"),
+                                              h4("Compact letter display"), DT::dataTableOutput("g_cld_table"),
+                                              downloadButton("g_dl_cld", "Download CSV", class = "btn-default uf-dl"),
+                                              h4("EMMeans plot"), plotOutput("g_emm_plot", height = "460px"),
+                                              downloadButton("g_dl_emmplot", "Download PNG", class = "btn-default uf-dl"),
+                                              code_panel("g_code_emm", "EMMeans code"))
+                         )
+               )
+             )
     ),
-
+    
     # =======================================================================
     # TAB 2 : Binary (0/1) GLMM  \u2014 kept fully separate from the general tab
     # =======================================================================
     tabPanel("Binary (0/1) GLMM",
-      sidebarLayout(
-        sidebarPanel(width = 4,
-          helpText(tags$b("Binary outcomes are handled separately."), " The response ",
-                   "must be numeric 0/1 or a two-level factor; family is fixed to a ",
-                   "Bernoulli/binomial distribution (dispersion is not estimated for ",
-                   "true 0/1 data, so no dispersion-model picker is shown here)."),
-          setup_controls("b"),
-          tags$hr(),
-          uiOutput("b_response_ui"),
-          uiOutput("b_level_note"),
-          selectInput("b_link", "Link function", choices = BINARY_LINK_CHOICES, selected = "logit"),
-          uiOutput("b_fixed_ui"),
-          checkboxInput("b_interactions", "Include interactions among fixed effects", FALSE),
-          uiOutput("b_random_ui"),
-          tags$details(tags$summary(tags$b("\u25b8 Random slope (optional)")),
-                       uiOutput("b_slope_ui"), uiOutput("b_slope_group_ui")),
-          tags$details(open = NA, tags$summary(tags$b("\u25be Zero-inflation model (rare for true 0/1 data)")),
-                       checkboxInput("b_zi_on", "Include a zero-inflation term", FALSE),
-                       uiOutput("b_zi_vars_ui")),
-          tags$hr(),
-          uiOutput("b_emm_ui"), uiOutput("b_emm_by_ui"),
-          selectInput("b_adjust", "Post-hoc p-value adjustment",
-                      choices = c("Tukey" = "tukey", "Sidak" = "sidak",
-                                  "Bonferroni" = "bonferroni", "Holm" = "holm", "None" = "none"),
-                      selected = "tukey"),
-          sliderInput("b_conf", "Confidence level", min = 0.80, max = 0.99, value = 0.95, step = 0.01),
-          tags$hr(),
-          actionButton("b_run", "Fit model", class = "btn-primary"),
-          actionButton("b_reset", "Reset", class = "btn-default")
-        ),
-        mainPanel(width = 8,
-          uiOutput("b_message_box"),
-          tabsetPanel(id = "b_result_tabs",
-            tabPanel("Data", h4("Preview"), DT::dataTableOutput("b_data_head"),
-                     h4("Structure"), verbatimTextOutput("b_data_str")),
-            tabPanel("Model & code", h4("Formula used"), verbatimTextOutput("b_formula_txt"),
-                     h4("Model summary"), verbatimTextOutput("b_model_summary"),
-                     h4("AIC / BIC / logLik"), DT::dataTableOutput("b_fit_table"),
-                     h4("R code"), verbatimTextOutput("b_code_block"),
-                     tags$button("Copy code", class = "btn btn-default uf-copy",
-                                 onclick = "DEcopy('b_code_block', this)"),
-                     downloadButton("b_dl_code", "Download .R", class = "btn-default uf-dl")),
-            tabPanel("Wald ANOVA", verbatimTextOutput("b_anova_table")),
-            tabPanel("DHARMa residuals",
-                     helpText("For 0/1 data the DHARMa QQ/residual plot is naturally ",
-                               "grainy; focus on the formal tests below rather than the ",
-                               "visual pattern."),
-                     plotOutput("b_dharma_plot", height = "420px"),
-                     downloadButton("b_dl_dharma", "Download PNG", class = "btn-default uf-dl"),
-                     h4("Overdispersion test"), verbatimTextOutput("b_disp_test"),
-                     h4("Outlier test"), verbatimTextOutput("b_outlier_test"),
-                     code_panel("b_code_dharma", "DHARMa code")),
-            tabPanel("EMMeans & post-hoc",
-                     helpText("Shown on the probability (response) scale by default."),
-                     h4("Estimated marginal means (probability scale)"), DT::dataTableOutput("b_emm_table"),
-                     downloadButton("b_dl_emm", "Download CSV", class = "btn-default uf-dl"),
-                     h4("Pairwise comparisons (odds-ratio / link scale)"), DT::dataTableOutput("b_pairs_table"),
-                     downloadButton("b_dl_pairs", "Download CSV", class = "btn-default uf-dl"),
-                     h4("Compact letter display"), DT::dataTableOutput("b_cld_table"),
-                     downloadButton("b_dl_cld", "Download CSV", class = "btn-default uf-dl"),
-                     h4("EMMeans plot"), plotOutput("b_emm_plot", height = "460px"),
-                     downloadButton("b_dl_emmplot", "Download PNG", class = "btn-default uf-dl"),
-                     code_panel("b_code_emm", "EMMeans code"))
-          )
-        )
-      )
+             sidebarLayout(
+               sidebarPanel(width = 4,
+                            helpText(tags$b("Binary outcomes are handled separately."), " The response ",
+                                     "must be numeric 0/1 or a two-level factor; family is fixed to a ",
+                                     "Bernoulli/binomial distribution (dispersion is not estimated for ",
+                                     "true 0/1 data, so no dispersion-model picker is shown here)."),
+                            setup_controls("b"),
+                            tags$hr(),
+                            uiOutput("b_response_ui"),
+                            helpText(tags$b("Valid values: "), "exactly 0 or 1 (or a two-level factor, coded as the ",
+                                     "2nd level = \"success\"). Do not use for proportions or counts \u2014 use the ",
+                                     "General GLMM tab's Beta or Binomial-with-trials setup for those instead."),
+                            uiOutput("b_level_note"),
+                            selectInput("b_link",
+                                        tagList("Link function",
+                                                info_tip("logit: symmetric, most common, coefficients are log-odds. ",
+                                                         "probit: symmetric, coefficients on a normal-CDF scale. ",
+                                                         "cloglog: asymmetric, useful when 1s are rare. ",
+                                                         "cauchit: symmetric with heavier tails, robust to extreme predictors.")),
+                                        choices = BINARY_LINK_CHOICES, selected = "logit"),
+                            uiOutput("b_fixed_ui"),
+                            checkboxInput("b_interactions", "Include interactions among fixed effects", FALSE),
+                            uiOutput("b_random_ui"),
+                            tags$details(tags$summary(tags$b("\u25b8 Random slope (optional)")),
+                                         uiOutput("b_slope_ui"), uiOutput("b_slope_group_ui")),
+                            tags$details(open = NA, tags$summary(tags$b("\u25be Zero-inflation model (rare for true 0/1 data)")),
+                                         checkboxInput("b_zi_on", "Include a zero-inflation term", FALSE),
+                                         uiOutput("b_zi_vars_ui")),
+                            tags$hr(),
+                            uiOutput("b_emm_ui"), uiOutput("b_emm_by_ui"),
+                            selectInput("b_adjust", "Post-hoc p-value adjustment",
+                                        choices = c("Tukey" = "tukey", "Sidak" = "sidak",
+                                                    "Bonferroni" = "bonferroni", "Holm" = "holm", "None" = "none"),
+                                        selected = "tukey"),
+                            sliderInput("b_conf", "Confidence level", min = 0.80, max = 0.99, value = 0.95, step = 0.01),
+                            tags$hr(),
+                            actionButton("b_run", "Fit model", class = "btn-primary"),
+                            actionButton("b_reset", "Reset", class = "btn-default")
+               ),
+               mainPanel(width = 8,
+                         uiOutput("b_message_box"),
+                         tabsetPanel(id = "b_result_tabs",
+                                     tabPanel("Data", h4("Preview"), DT::dataTableOutput("b_data_head"),
+                                              h4("Structure"), verbatimTextOutput("b_data_str")),
+                                     tabPanel("Model & code", h4("Formula used"), verbatimTextOutput("b_formula_txt"),
+                                              h4("Model summary"), verbatimTextOutput("b_model_summary"),
+                                              h4("AIC / BIC / logLik"), DT::dataTableOutput("b_fit_table"),
+                                              h4("R code"), verbatimTextOutput("b_code_block"),
+                                              tags$button("Copy code", class = "btn btn-default uf-copy",
+                                                          onclick = "DEcopy('b_code_block', this)"),
+                                              downloadButton("b_dl_code", "Download .R", class = "btn-default uf-dl")),
+                                     tabPanel("Wald ANOVA", verbatimTextOutput("b_anova_table")),
+                                     tabPanel("DHARMa residuals",
+                                              helpText("For 0/1 data the DHARMa QQ/residual plot is naturally ",
+                                                       "grainy; focus on the formal tests below rather than the ",
+                                                       "visual pattern."),
+                                              plotOutput("b_dharma_plot", height = "420px"),
+                                              downloadButton("b_dl_dharma", "Download PNG", class = "btn-default uf-dl"),
+                                              h4("Overdispersion test"), verbatimTextOutput("b_disp_test"),
+                                              h4("Outlier test"), verbatimTextOutput("b_outlier_test"),
+                                              code_panel("b_code_dharma", "DHARMa code")),
+                                     tabPanel("EMMeans & post-hoc",
+                                              helpText("Shown on the probability (response) scale by default."),
+                                              h4("Estimated marginal means (probability scale)"), DT::dataTableOutput("b_emm_table"),
+                                              downloadButton("b_dl_emm", "Download CSV", class = "btn-default uf-dl"),
+                                              h4("Pairwise comparisons (odds-ratio / link scale)"), DT::dataTableOutput("b_pairs_table"),
+                                              downloadButton("b_dl_pairs", "Download CSV", class = "btn-default uf-dl"),
+                                              h4("Compact letter display"), DT::dataTableOutput("b_cld_table"),
+                                              downloadButton("b_dl_cld", "Download CSV", class = "btn-default uf-dl"),
+                                              h4("EMMeans plot"), plotOutput("b_emm_plot", height = "460px"),
+                                              downloadButton("b_dl_emmplot", "Download PNG", class = "btn-default uf-dl"),
+                                              code_panel("b_code_emm", "EMMeans code"))
+                         )
+               )
+             )
     )
   )
 )
@@ -419,7 +448,7 @@ ui <- fluidPage(
 #  Server
 # ===========================================================================
 server <- function(input, output, session) {
-
+  
   # -- Shared raw data --------------------------------------------------------
   raw_data <- reactive({
     if (input$data_source == "example") {
@@ -435,13 +464,13 @@ server <- function(input, output, session) {
     })
     df
   })
-
+  
   # Build one self-contained "module" of reactive logic per prefix ("g" or "b")
   # so the two tabs are genuinely independent (separate state, separate fit).
   make_module <- function(prefix, binary = FALSE) {
     P <- function(id) paste0(prefix, "_", id)
     rv <- reactiveValues(reset = 0, fit = NULL, message = NULL, combos = list())
-
+    
     dataset <- reactive({
       df <- raw_data(); rv$reset
       ff <- input[[P("force_factor")]]
@@ -452,14 +481,14 @@ server <- function(input, output, session) {
       }
       df
     })
-
+    
     output[[P("force_factor_ui")]] <- renderUI({
       df <- dataset(); req(df)
       num_cols <- names(df)[vapply(df, is.numeric, logical(1))]
       selectizeInput(P("force_factor"), "Treat these numeric columns as factors",
                      choices = num_cols, multiple = TRUE)
     })
-
+    
     output[[P("combo_vars_ui")]] <- renderUI({
       df <- dataset(); req(df)
       selectizeInput(P("combo_vars"), "Columns to combine (choose 2+)",
@@ -479,7 +508,7 @@ server <- function(input, output, session) {
       if (!length(rv$combos)) return(helpText("No combined variables yet."))
       helpText("Created: ", paste(vapply(rv$combos, `[[`, character(1), "name"), collapse = ", "))
     })
-
+    
     output[[P("response_ui")]] <- renderUI({
       df <- dataset(); req(df); rv$reset
       if (binary) {
@@ -498,7 +527,7 @@ server <- function(input, output, session) {
       df <- dataset(); r <- input$b_response; req(r)
       if (is.factor(df[[r]])) helpText(sprintf("Modeling P(%s = \"%s\").", r, levels(df[[r]])[2]))
     })
-
+    
     output[[P("fixed_ui")]] <- renderUI({
       df <- dataset(); req(df); rv$reset
       selectizeInput(P("fixed"), sprintf("Fixed effects (up to %d)", MAX_FIXED),
@@ -517,10 +546,36 @@ server <- function(input, output, session) {
       rs <- input[[P("ranslope")]]; rnd <- input[[P("random")]]
       if (is.null(rs) || !nzchar(rs) || !length(rnd)) return(NULL)
       selectInput(P("slope_group"), "Apply slope to which grouping factor(s)?",
-                 choices = rnd, selected = rnd[1], multiple = TRUE)
+                  choices = rnd, selected = rnd[1], multiple = TRUE)
     })
-
+    
     if (!binary) {
+      # Live note for whatever family is currently selected, plus an automatic
+      # check of the chosen response's actual range against that family's
+      # valid domain (e.g. flags negative values under Gamma/log, or values
+      # outside (0,1) under Beta) BEFORE the user hits "Fit model".
+      output$g_family_note <- renderUI({
+        req(input$g_family)
+        note <- FAMILY_DOMAIN_NOTE[[input$g_family]] %||% ""
+        df <- dataset(); resp <- input$g_response
+        warn <- NULL
+        if (!is.null(resp) && resp %in% names(df) && is.numeric(df[[resp]])) {
+          x <- df[[resp]][is.finite(df[[resp]])]
+          out_of_range <- switch(input$g_family,
+                                 "gaussian_log" = ,
+                                 "Gamma_log"    = any(x <= 0),
+                                 "poisson_log"  = ,
+                                 "nbinom2_log"  = ,
+                                 "nbinom1_log"  = any(x < 0 | x != round(x)),
+                                 "tweedie_log"  = any(x < 0),
+                                 "beta_logit"   = any(x <= 0 | x >= 1),
+                                 FALSE)
+          if (isTRUE(out_of_range))
+            warn <- sprintf("\u26a0 '%s' contains values outside this family's valid range \u2014 check the note above before fitting.", resp)
+        }
+        tagList(helpText(note),
+                if (!is.null(warn)) div(class = "alert alert-warning", style = "padding:6px 10px;", warn))
+      })
       output$g_zi_vars_ui <- renderUI({
         req(input$g_zi_on)
         df <- dataset(); fx <- input$g_fixed
@@ -541,7 +596,7 @@ server <- function(input, output, session) {
                        choices = names(df), multiple = TRUE)
       })
     }
-
+    
     output[[P("emm_ui")]] <- renderUI({
       df <- dataset(); fx <- input[[P("fixed")]]
       cat_fx <- if (length(fx)) fx[is_categorical(df, fx)] else character(0)
@@ -552,26 +607,26 @@ server <- function(input, output, session) {
       ev <- input[[P("emmvars")]]
       if (length(ev) < 2) return(NULL)
       selectInput(P("emm_by"), "Compare within (optional, simple effects)",
-                 choices = c("(none)" = "", ev), selected = "")
+                  choices = c("(none)" = "", ev), selected = "")
     })
-
+    
     output[[P("data_head")]] <- DT::renderDataTable({
       df <- dataset(); req(df)
       DT::datatable(head(df, 10), options = list(dom = "t", scrollX = TRUE), rownames = FALSE)
     })
     output[[P("data_str")]] <- renderPrint({ df <- dataset(); req(df); str(df) })
-
+    
     output[[P("message_box")]] <- renderUI({
       m <- rv$message; req(m)
       cls <- switch(m$type, warning = "alert-warning", danger = "alert-danger", "alert-info")
       div(class = paste("alert", cls), m$text)
     })
-
+    
     observeEvent(input[[P("reset")]], {
       rv$reset <- rv$reset + 1; rv$fit <- NULL; rv$combos <- list()
       rv$message <- list(type = "info", text = "Reset. Choose variables and fit again.")
     })
-
+    
     # -- Fit -------------------------------------------------------------------
     observeEvent(input[[P("run")]], {
       df  <- dataset()
@@ -585,15 +640,15 @@ server <- function(input, output, session) {
                            text = "No random effect selected \u2014 glmmTMB will fit an ordinary GLM (no grouping structure).")
       }
       if (binary) df[[resp]] <- if (is.factor(df[[resp]])) as.integer(df[[resp]]) - 1L else df[[resp]]
-
+      
       main_f <- build_formula_string(resp, fx, rnd, input[[P("interactions")]],
                                      input[[P("ranslope")]], input[[P("slope_group")]])
       zi_on  <- if (binary) isTRUE(input$b_zi_on) else isTRUE(input$g_zi_on)
       zi_f   <- build_side_formula(if (binary) input$b_zi_vars else input$g_zi_vars, zi_on)
       disp_f <- if (binary) "~1" else build_side_formula(input$g_disp_vars, TRUE)
-
+      
       fam <- if (binary) binomial(link = input$b_link) else family_from_key(input$g_family)
-
+      
       mod <- tryCatch(
         glmmTMB::glmmTMB(formula = stats::as.formula(main_f),
                          ziformula = stats::as.formula(zi_f),
@@ -605,20 +660,20 @@ server <- function(input, output, session) {
         rv$fit <- NULL; return()
       }
       rv$fit <- list(mod = mod, response = resp, fixed = fx, random = rnd,
-                    main_f = main_f, zi_f = zi_f, disp_f = disp_f,
-                    family_key = if (binary) input$b_link else input$g_family, data = df,
-                    emmvars = input[[P("emmvars")]], emm_by = input[[P("emm_by")]],
-                    adjust = input[[P("adjust")]], conf = input[[P("conf")]])
+                     main_f = main_f, zi_f = zi_f, disp_f = disp_f,
+                     family_key = if (binary) input$b_link else input$g_family, data = df,
+                     emmvars = input[[P("emmvars")]], emm_by = input[[P("emm_by")]],
+                     adjust = input[[P("adjust")]], conf = input[[P("conf")]])
       rv$message <- list(type = "info", text = "Model fitted.")
     })
-
+    
     output[[P("formula_txt")]] <- renderPrint({
       req(rv$fit)
       cat("Conditional: ", rv$fit$main_f, "\n")
       cat("ziformula:   ", rv$fit$zi_f, "\n")
       cat("dispformula: ", rv$fit$disp_f, "\n")
       cat("family:      ", if (binary) sprintf("binomial(link='%s')", rv$fit$family_key)
-                          else rv$fit$family_key, "\n")
+          else rv$fit$family_key, "\n")
     })
     output[[P("model_summary")]] <- renderPrint({ req(rv$fit); print(summary(rv$fit$mod)) })
     output[[P("fit_table")]] <- DT::renderDataTable({
@@ -629,7 +684,7 @@ server <- function(input, output, session) {
                         df.resid = stats::df.residual(m))
       DT::datatable(tab, options = list(dom = "t"), rownames = FALSE)
     })
-
+    
     build_code <- function() {
       req(rv$fit)
       sprintf(paste0(
@@ -647,7 +702,7 @@ server <- function(input, output, session) {
     output[[P("dl_code")]] <- downloadHandler(
       filename = function() "glmmTMB_model_code.R",
       content = function(file) writeLines(build_code(), file))
-
+    
     # -- Wald ANOVA --------------------------------------------------------
     output[[P("anova_table")]] <- renderPrint({
       req(rv$fit)
@@ -655,7 +710,7 @@ server <- function(input, output, session) {
       res <- tryCatch(car::Anova(rv$fit$mod, type = 3), error = function(e) e)
       if (inherits(res, "error")) cat("ANOVA failed:", conditionMessage(res)) else print(res)
     })
-
+    
     # -- DHARMa --------------------------------------------------------------
     dharma_sim <- reactive({ req(rv$fit); DHARMa::simulateResiduals(rv$fit$mod, n = 250) })
     draw_dharma <- function() plot(dharma_sim())
@@ -663,8 +718,22 @@ server <- function(input, output, session) {
     output[[P("dl_dharma")]] <- downloadHandler(
       filename = function() "dharma_residuals.png",
       content = function(file) { png(file, width = 900, height = 600); draw_dharma(); dev.off() })
+    # Two independent overdispersion checks, shown together: (1) DHARMa's
+    # simulation-based test (the primary, requested method), and (2) a classic
+    # Pearson chi-square / residual-df ratio as a quick cross-check. Ratios
+    # near 1 support the chosen family; well above 1 suggests overdispersion
+    # (try nbinom2/nbinom1 instead of Poisson, or add a dispformula predictor);
+    # well below 1 suggests underdispersion.
     output[[P("disp_test")]] <- renderPrint({
       req(rv$fit)
+      ratio <- tryCatch({
+        pr <- stats::residuals(rv$fit$mod, type = "pearson")
+        rdf <- stats::df.residual(rv$fit$mod)
+        sum(pr^2, na.rm = TRUE) / rdf
+      }, error = function(e) NA)
+      cat("Pearson chi-sq / residual df ratio:", if (is.na(ratio)) "unavailable" else round(ratio, 3), "\n")
+      cat("  (~1 = fine; >>1 = overdispersion; <<1 = underdispersion)\n\n")
+      cat("DHARMa simulation-based dispersion test:\n")
       print(tryCatch(DHARMa::testDispersion(dharma_sim()), error = function(e) e))
     })
     if (!binary) output$g_zi_test <- renderPrint({
@@ -675,7 +744,7 @@ server <- function(input, output, session) {
       req(rv$fit)
       print(tryCatch(DHARMa::testOutliers(dharma_sim()), error = function(e) e))
     })
-
+    
     # -- EMMeans / post-hoc ---------------------------------------------------
     emm_result <- reactive({
       req(rv$fit); ev <- rv$fit$emmvars
@@ -704,12 +773,12 @@ server <- function(input, output, session) {
       validate(need(!inherits(c, "error"), "Compact letter display failed."))
       DT::datatable(round_df(c), options = list(dom = "tp"), rownames = FALSE) })
     output[[P("dl_emm")]] <- downloadHandler(filename = function() "emmeans.csv",
-      content = function(file) write.csv(emm_result()$emm, file, row.names = FALSE))
+                                             content = function(file) write.csv(emm_result()$emm, file, row.names = FALSE))
     output[[P("dl_pairs")]] <- downloadHandler(filename = function() "pairwise.csv",
-      content = function(file) write.csv(emm_result()$pairs, file, row.names = FALSE))
+                                               content = function(file) write.csv(emm_result()$pairs, file, row.names = FALSE))
     output[[P("dl_cld")]] <- downloadHandler(filename = function() "cld.csv",
-      content = function(file) write.csv(emm_result()$cld, file, row.names = FALSE))
-
+                                             content = function(file) write.csv(emm_result()$cld, file, row.names = FALSE))
+    
     build_emm_plot <- function() {
       er <- emm_result(); d <- er$cld; ev <- er$ev
       valcol <- if ("response" %in% names(d)) "response" else "emmean"
@@ -718,9 +787,9 @@ server <- function(input, output, session) {
       x <- ev[1]; colr <- if (length(ev) >= 2) ev[2] else NA
       d[[x]] <- factor(d[[x]])
       p <- if (is.na(colr)) ggplot(d, aes(x = .data[[x]], y = .data[[valcol]])) + geom_point(size = 3, colour = UF_BLUE)
-           else { d[[colr]] <- factor(d[[colr]])
-             ggplot(d, aes(x = .data[[x]], y = .data[[valcol]], colour = .data[[colr]])) +
-               geom_point(size = 3, position = position_dodge(0.5)) + scale_colour_manual(values = rep(UF_COLORS, 5)) }
+      else { d[[colr]] <- factor(d[[colr]])
+      ggplot(d, aes(x = .data[[x]], y = .data[[valcol]], colour = .data[[colr]])) +
+        geom_point(size = 3, position = position_dodge(0.5)) + scale_colour_manual(values = rep(UF_COLORS, 5)) }
       if (!is.na(lcol) && !is.na(ucol)) p <- p + geom_errorbar(aes(ymin = .data[[lcol]], ymax = .data[[ucol]]), width = 0.15)
       if (".group" %in% names(d)) p <- p + geom_text(aes(label = .group), vjust = -0.8, fontface = "bold")
       p + labs(x = x, y = "Estimated marginal mean (response scale)", title = "EMMeans \u00b1 CI") +
@@ -728,19 +797,21 @@ server <- function(input, output, session) {
     }
     output[[P("emm_plot")]] <- renderPlot({ print(build_emm_plot()) })
     output[[P("dl_emmplot")]] <- downloadHandler(filename = function() "emmeans_plot.png",
-      content = function(file) ggsave(file, build_emm_plot(), width = 9, height = 6, dpi = 150))
-
+                                                 content = function(file) ggsave(file, build_emm_plot(), width = 9, height = 6, dpi = 150))
+    
     build_dharma_code <- function() paste0(
+      "# quick manual overdispersion check (Pearson chi-sq / residual df; ~1 is fine)\n",
+      "sum(residuals(mod, type = 'pearson')^2) / df.residual(mod)\n\n",
       "sim <- simulateResiduals(mod, n = 250, plot = TRUE)\n",
       "testDispersion(sim)\n", if (!binary) "testZeroInflation(sim)\n" else "", "testOutliers(sim)\n")
     output[[P("code_dharma")]] <- renderPrint(cat(build_dharma_code()))
     output[[P("code_emm")]] <- renderPrint(cat(
       "emm <- emmeans(mod, ~ your_factor, type = 'response')\n",
       "pairs(emm, adjust = 'tukey')\n", "multcomp::cld(emm, adjust = 'tukey', Letters = letters)\n"))
-
+    
     invisible(NULL)
   }
-
+  
   make_module("g", binary = FALSE)
   make_module("b", binary = TRUE)
 }
