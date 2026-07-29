@@ -20,7 +20,13 @@
 #                       (no dispersion model, restricted family list, link
 #                       choice, and different DHARMa expectations). Keeping
 #                       this separate avoids the "it silently did something
-#                       odd with my 0/1 column" failure mode.
+#                       odd with my 0/1 column" failure mode. Supports both
+#                       individual 0/1 rows AND grouped successes/total-trials
+#                       counts (failures = total - successes, computed for you).
+#    * Ordered beta    : "Ordered beta (logit link)" on the General GLMM tab
+#                       covers proportions that include exact 0s and/or 1s,
+#                       which the standard Beta family cannot (it requires
+#                       values strictly inside (0,1)).
 #
 #  Install once:
 #    install.packages(c("shiny","shinyjs","bslib","glmmTMB","DHARMa","emmeans",
@@ -115,11 +121,17 @@ build_fixed_part <- function(fixed, interactions) {
 }
 
 # Main conditional (fixed + random) formula, e.g.  y ~ A * B + (1 | Block)
+# `response` is normally a bare column name (quoted internally via bq()), but
+# for grouped-binomial fits the caller passes an already-built expression like
+# "cbind(`succ`, `tot` - `succ`)" and sets quote_response = FALSE so it is
+# used as-is instead of being wrapped in backticks.
 build_formula_string <- function(response, fixed, random, interactions,
-                                 slope = NULL, slope_group = NULL) {
+                                 slope = NULL, slope_group = NULL,
+                                 quote_response = TRUE) {
+  resp_part   <- if (quote_response) bq(response) else response
   fixed_part  <- build_fixed_part(fixed, interactions)
   random_part <- build_random_part(random, slope, slope_group)
-  paste(bq(response), "~", fixed_part, "+", random_part)
+  paste(resp_part, "~", fixed_part, "+", random_part)
 }
 
 # Zero-inflation / dispersion side formulas: character vector of predictor
@@ -140,7 +152,8 @@ FAMILY_CHOICES <- c(
   "Negative binomial, nbinom2 (log link)  \u2013 overdispersed counts" = "nbinom2_log",
   "Negative binomial, nbinom1 (log link)"           = "nbinom1_log",
   "Tweedie (log link)  \u2013 zero-heavy continuous" = "tweedie_log",
-  "Beta (logit link)  \u2013 proportions in (0,1)"  = "beta_logit"
+  "Beta (logit link)  \u2013 proportions in (0,1)"  = "beta_logit",
+  "Ordered beta (logit link)  \u2013 proportions in [0,1], INCLUDES 0 and 1" = "ordbeta_logit"
 )
 family_from_key <- function(key) {
   switch(key,
@@ -152,8 +165,23 @@ family_from_key <- function(key) {
          "nbinom1_log"        = glmmTMB::nbinom1(link = "log"),
          "tweedie_log"        = glmmTMB::tweedie(link = "log"),
          "beta_logit"         = glmmTMB::beta_family(link = "logit"),
+         "ordbeta_logit"      = glmmTMB::ordbeta(link = "logit"),
          gaussian())
 }
+# Matching valid-R constructor text for the "R code" / formula display panels,
+# so the code a user copies actually runs standalone (rather than showing the
+# internal dropdown key).
+FAMILY_CODE_TEXT <- c(
+  "gaussian_identity" = "gaussian(link = 'identity')",
+  "gaussian_log"       = "gaussian(link = 'log')",
+  "Gamma_log"          = "Gamma(link = 'log')",
+  "poisson_log"        = "poisson(link = 'log')",
+  "nbinom2_log"        = "glmmTMB::nbinom2(link = 'log')",
+  "nbinom1_log"        = "glmmTMB::nbinom1(link = 'log')",
+  "tweedie_log"        = "glmmTMB::tweedie(link = 'log')",
+  "beta_logit"         = "glmmTMB::beta_family(link = 'logit')",
+  "ordbeta_logit"      = "glmmTMB::ordbeta(link = 'logit')"
+)
 BINARY_LINK_CHOICES <- c("logit" = "logit", "probit" = "probit",
                          "cloglog" = "cloglog", "cauchit" = "cauchit")
 
@@ -168,7 +196,8 @@ FAMILY_DOMAIN_NOTE <- c(
   "nbinom2_log"        = "Non-negative integer counts (0, 1, 2, ...). Use this over Poisson when counts are overdispersed (variance > mean).",
   "nbinom1_log"        = "Non-negative integer counts (0, 1, 2, ...). An alternative overdispersion structure to nbinom2 (variance scales linearly with the mean).",
   "tweedie_log"        = "Non-negative continuous values, and CAN include exact zeros (e.g. rainfall, biomass with true absences).",
-  "beta_logit"         = "Strictly between 0 and 1 \u2014 EXCLUDES exact 0 and exact 1. Rescale data that touches the boundaries, e.g. y' = (y*(n-1)+0.5)/n."
+  "beta_logit"         = "Strictly between 0 and 1 \u2014 EXCLUDES exact 0 and exact 1. Rescale data that touches the boundaries, e.g. y' = (y*(n-1)+0.5)/n.",
+  "ordbeta_logit"      = "The CLOSED interval [0,1] \u2014 CAN include exact 0s and exact 1s (that's the whole point of this family vs. standard Beta). Use this instead of rescaling boundary values away."
 )
 
 # ---------------------------------------------------------------------------
@@ -199,9 +228,17 @@ make_example_data <- function() {
   eta <- 0.5 + trtC * 0.5 + seaC * 0.3 + b
   d$cover_prop <- pmin(pmax(plogis(eta) + rnorm(n, 0, 0.03), 0.001), 0.999)
   
-  # binary presence/absence -> binomial (own tab)
+  # proportion in [0,1], CAN include exact 0s/1s -> ordered beta family target
+  d$cover_prop_ord <- pmin(pmax(plogis(eta) + rnorm(n, 0, 0.12), 0), 1)
+  
+  # binary presence/absence -> binomial (own tab, individual 0/1 rows)
   peta <- -0.3 + 0.9 * (d$Treatment == "Fertilized") - 0.6 * (d$Treatment == "Grazed") + b
   d$present <- rbinom(n, 1, plogis(peta))
+  
+  # grouped binomial counts -> successes out of total trials (own tab,
+  # "grouped counts" mode; failures = trials - successes computed for you)
+  d$trials    <- sample(8:15, n, replace = TRUE)
+  d$successes <- rbinom(n, d$trials, plogis(peta))
   
   d
 }
@@ -290,7 +327,9 @@ ui <- fluidPage(
                                                 info_tip("Choose the distribution that matches your response's ",
                                                          "valid range (e.g. counts, positive continuous, or a ",
                                                          "proportion). The note below the box updates for whatever ",
-                                                         "family is selected and lists exactly what values are valid.")),
+                                                         "family is selected and lists exactly what values are valid. ",
+                                                         "If your proportion data includes exact 0s or 1s, use ",
+                                                         "Ordered beta instead of standard Beta.")),
                                         choices = FAMILY_CHOICES, selected = "nbinom2_log"),
                             uiOutput("g_family_note"),
                             uiOutput("g_fixed_ui"),
@@ -362,22 +401,43 @@ ui <- fluidPage(
     ),
     
     # =======================================================================
-    # TAB 2 : Binary (0/1) GLMM  \u2014 kept fully separate from the general tab
+    # TAB 2 : Binary / binomial-count GLMM  \u2014 kept fully separate from the
+    #         general tab. Supports individual 0/1 rows OR grouped
+    #         successes/total-trials counts (failures computed automatically).
     # =======================================================================
     tabPanel("Binary (0/1) GLMM",
              sidebarLayout(
                sidebarPanel(width = 4,
-                            helpText(tags$b("Binary outcomes are handled separately."), " The response ",
-                                     "must be numeric 0/1 or a two-level factor; family is fixed to a ",
-                                     "Bernoulli/binomial distribution (dispersion is not estimated for ",
-                                     "true 0/1 data, so no dispersion-model picker is shown here)."),
+                            helpText(tags$b("Binary & binomial-count outcomes are handled separately."),
+                                     " Use individual 0/1 rows, or grouped successes/total-trials counts ",
+                                     "below; family is fixed to a Bernoulli/binomial distribution ",
+                                     "(dispersion is not estimated for binomial data, so no dispersion-model ",
+                                     "picker is shown here). If you instead have a continuous PROPORTION that ",
+                                     "can equal exactly 0 or 1 (not a successes/trials count), use the ",
+                                     tags$b("Ordered beta"), " family on the General GLMM tab."),
                             setup_controls("b"),
                             tags$hr(),
-                            uiOutput("b_response_ui"),
-                            helpText(tags$b("Valid values: "), "exactly 0 or 1 (or a two-level factor, coded as the ",
-                                     "2nd level = \"success\"). Do not use for proportions or counts \u2014 use the ",
-                                     "General GLMM tab's Beta or Binomial-with-trials setup for those instead."),
-                            uiOutput("b_level_note"),
+                            radioButtons("b_resp_type", "Response format",
+                                        choices = c("Individual rows (0/1 outcome per row)" = "binary",
+                                                    "Grouped counts (successes out of total trials)" = "grouped"),
+                                        selected = "binary"),
+                            conditionalPanel(
+                              "input.b_resp_type == 'binary'",
+                              uiOutput("b_response_ui"),
+                              helpText(tags$b("Valid values: "), "exactly 0 or 1 (or a two-level factor, ",
+                                       "coded as the 2nd level = \"success\")."),
+                              uiOutput("b_level_note")
+                            ),
+                            conditionalPanel(
+                              "input.b_resp_type == 'grouped'",
+                              helpText("Pick a column of success counts and a column of total trials. ",
+                                       "The number of failures is calculated automatically as ",
+                                       tags$b("total \u2212 successes"), " \u2014 you don't need to create a ",
+                                       "separate failures column yourself."),
+                              uiOutput("b_success_ui"),
+                              uiOutput("b_total_ui"),
+                              uiOutput("b_grouped_note")
+                            ),
                             selectInput("b_link",
                                         tagList("Link function",
                                                 info_tip("logit: symmetric, most common, coefficients are log-odds. ",
@@ -524,6 +584,7 @@ server <- function(input, output, session) {
       }
     })
     if (binary) output$b_level_note <- renderUI({
+      req(identical(input$b_resp_type, "binary"))
       df <- dataset(); r <- input$b_response; req(r)
       if (is.factor(df[[r]])) helpText(sprintf("Modeling P(%s = \"%s\").", r, levels(df[[r]])[2]))
     })
@@ -553,7 +614,7 @@ server <- function(input, output, session) {
       # Live note for whatever family is currently selected, plus an automatic
       # check of the chosen response's actual range against that family's
       # valid domain (e.g. flags negative values under Gamma/log, or values
-      # outside (0,1) under Beta) BEFORE the user hits "Fit model".
+      # outside [0,1] under Beta/Ordered-beta) BEFORE the user hits "Fit model".
       output$g_family_note <- renderUI({
         req(input$g_family)
         note <- FAMILY_DOMAIN_NOTE[[input$g_family]] %||% ""
@@ -569,6 +630,7 @@ server <- function(input, output, session) {
                                  "nbinom1_log"  = any(x < 0 | x != round(x)),
                                  "tweedie_log"  = any(x < 0),
                                  "beta_logit"   = any(x <= 0 | x >= 1),
+                                 "ordbeta_logit" = any(x < 0 | x > 1),
                                  FALSE)
           if (isTRUE(out_of_range))
             warn <- sprintf("\u26a0 '%s' contains values outside this family's valid range \u2014 check the note above before fitting.", resp)
@@ -594,6 +656,41 @@ server <- function(input, output, session) {
         df <- dataset()
         selectizeInput("b_zi_vars", "Zero-inflation predictors (blank = intercept only)",
                        choices = names(df), multiple = TRUE)
+      })
+      
+      # Grouped-binomial support: user picks a successes column and a total-
+      # trials column; failures = total - successes are computed automatically
+      # (as an arithmetic expression inside the model formula, not a stored
+      # column), so no separate "failures" column is ever required.
+      int_like <- function(x) is.numeric(x) && all(is.na(x) | (x >= 0 & x == round(x)))
+      
+      output$b_success_ui <- renderUI({
+        df <- dataset(); req(df)
+        cand <- names(df)[vapply(df, int_like, logical(1))]
+        validate(need(length(cand) > 0,
+                      "No non-negative whole-number columns found to use as a successes count."))
+        selectInput("b_success", "Successes column (count)", choices = cand)
+      })
+      output$b_total_ui <- renderUI({
+        df <- dataset(); req(df)
+        cand <- names(df)[vapply(df, int_like, logical(1))]
+        choices <- setdiff(cand, input$b_success %||% "")
+        validate(need(length(choices) > 0,
+                      "Need another whole-number column, distinct from the successes column, for total trials."))
+        selectInput("b_total", "Total trials column (successes + failures)", choices = choices)
+      })
+      output$b_grouped_note <- renderUI({
+        df <- dataset(); succ <- input$b_success; tot <- input$b_total
+        req(succ, tot)
+        failures <- df[[tot]] - df[[succ]]
+        bad <- any(failures < 0, na.rm = TRUE)
+        tagList(
+          helpText(sprintf("Failures are computed automatically as %s \u2212 %s. The model's response becomes cbind(%s, %s \u2212 %s).",
+                            tot, succ, succ, tot, succ)),
+          if (isTRUE(bad))
+            div(class = "alert alert-warning", style = "padding:6px 10px;",
+                sprintf("\u26a0 '%s' is greater than '%s' in at least one row, which would give negative failures. Check the data before fitting.", succ, tot))
+        )
       })
     }
     
@@ -630,8 +727,37 @@ server <- function(input, output, session) {
     # -- Fit -------------------------------------------------------------------
     observeEvent(input[[P("run")]], {
       df  <- dataset()
-      resp <- input[[P("response")]]; fx <- input[[P("fixed")]]; rnd <- input[[P("random")]]
-      validate(need(!is.null(resp), "Choose a response variable."))
+      fx <- input[[P("fixed")]]; rnd <- input[[P("random")]]
+      
+      resp_expr <- NULL; resp_label <- NULL; quote_resp <- TRUE
+      
+      if (binary && identical(input$b_resp_type, "grouped")) {
+        succ <- input$b_success; tot <- input$b_total
+        validate(need(!is.null(succ) && !is.null(tot) && nzchar(succ) && nzchar(tot),
+                      "Choose both a successes column and a total-trials column."))
+        if (identical(succ, tot)) {
+          rv$message <- list(type = "warning", text = "Successes and total-trials columns must be different.")
+          return()
+        }
+        bad <- df[[succ]] > df[[tot]] | df[[succ]] < 0 | df[[tot]] < 0
+        if (any(bad, na.rm = TRUE)) {
+          rv$message <- list(type = "danger",
+                             text = sprintf("'%s' exceeds '%s' (or a negative value is present) in %d row(s) \u2014 fix the data before fitting.",
+                                            succ, tot, sum(bad, na.rm = TRUE)))
+          return()
+        }
+        resp_expr  <- sprintf("cbind(%s, %s - %s)", bq(succ), bq(tot), bq(succ))
+        resp_label <- sprintf("%s successes / %s total", succ, tot)
+        quote_resp <- FALSE
+      } else {
+        resp <- input[[P("response")]]
+        validate(need(!is.null(resp), "Choose a response variable."))
+        if (binary) df[[resp]] <- if (is.factor(df[[resp]])) as.integer(df[[resp]]) - 1L else df[[resp]]
+        resp_expr  <- resp
+        resp_label <- resp
+        quote_resp <- TRUE
+      }
+      
       if (length(fx) == 0 && length(rnd) == 0) {
         rv$message <- list(type = "warning", text = "Choose at least one fixed or random effect."); return()
       }
@@ -639,10 +765,10 @@ server <- function(input, output, session) {
         rv$message <- list(type = "warning",
                            text = "No random effect selected \u2014 glmmTMB will fit an ordinary GLM (no grouping structure).")
       }
-      if (binary) df[[resp]] <- if (is.factor(df[[resp]])) as.integer(df[[resp]]) - 1L else df[[resp]]
       
-      main_f <- build_formula_string(resp, fx, rnd, input[[P("interactions")]],
-                                     input[[P("ranslope")]], input[[P("slope_group")]])
+      main_f <- build_formula_string(resp_expr, fx, rnd, input[[P("interactions")]],
+                                     input[[P("ranslope")]], input[[P("slope_group")]],
+                                     quote_response = quote_resp)
       zi_on  <- if (binary) isTRUE(input$b_zi_on) else isTRUE(input$g_zi_on)
       zi_f   <- build_side_formula(if (binary) input$b_zi_vars else input$g_zi_vars, zi_on)
       disp_f <- if (binary) "~1" else build_side_formula(input$g_disp_vars, TRUE)
@@ -659,7 +785,7 @@ server <- function(input, output, session) {
         rv$message <- list(type = "danger", text = paste("Model failed to fit:", conditionMessage(mod)))
         rv$fit <- NULL; return()
       }
-      rv$fit <- list(mod = mod, response = resp, fixed = fx, random = rnd,
+      rv$fit <- list(mod = mod, response = resp_label, fixed = fx, random = rnd,
                      main_f = main_f, zi_f = zi_f, disp_f = disp_f,
                      family_key = if (binary) input$b_link else input$g_family, data = df,
                      emmvars = input[[P("emmvars")]], emm_by = input[[P("emm_by")]],
@@ -672,8 +798,9 @@ server <- function(input, output, session) {
       cat("Conditional: ", rv$fit$main_f, "\n")
       cat("ziformula:   ", rv$fit$zi_f, "\n")
       cat("dispformula: ", rv$fit$disp_f, "\n")
-      cat("family:      ", if (binary) sprintf("binomial(link='%s')", rv$fit$family_key)
-          else rv$fit$family_key, "\n")
+      fam_text <- if (binary) sprintf("binomial(link='%s')", rv$fit$family_key)
+                  else (FAMILY_CODE_TEXT[[rv$fit$family_key]] %||% rv$fit$family_key)
+      cat("family:      ", fam_text, "\n")
     })
     output[[P("model_summary")]] <- renderPrint({ req(rv$fit); print(summary(rv$fit$mod)) })
     output[[P("fit_table")]] <- DT::renderDataTable({
@@ -687,6 +814,8 @@ server <- function(input, output, session) {
     
     build_code <- function() {
       req(rv$fit)
+      fam_text <- if (binary) sprintf("binomial(link = '%s')", rv$fit$family_key)
+                  else (FAMILY_CODE_TEXT[[rv$fit$family_key]] %||% rv$fit$family_key)
       sprintf(paste0(
         "library(glmmTMB); library(DHARMa); library(emmeans)\n\n",
         "mod <- glmmTMB(\n  %s,\n  ziformula = %s,\n  dispformula = %s,\n  family = %s,\n  data = your_data)\n\n",
@@ -694,8 +823,7 @@ server <- function(input, output, session) {
         "sim <- simulateResiduals(mod, n = 250, plot = TRUE)\n",
         "testDispersion(sim)\n%s",
         "car::Anova(mod, type = 3)\n"),
-        rv$fit$main_f, rv$fit$zi_f, rv$fit$disp_f,
-        if (binary) sprintf("binomial(link = '%s')", rv$fit$family_key) else rv$fit$family_key,
+        rv$fit$main_f, rv$fit$zi_f, rv$fit$disp_f, fam_text,
         if (!binary) "testZeroInflation(sim)\n" else "")
     }
     output[[P("code_block")]] <- renderPrint(cat(build_code()))
